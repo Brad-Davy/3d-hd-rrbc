@@ -63,7 +63,7 @@ file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_".format(Rayleigh,Ekman,Prandtl,N)
 file_tag=file_tag.replace(".","-")
 
 ## Make the directory to save the output files ##
-if comm.rank==0:
+if comm.rank == 0:
    os.system('mkdir results/{}'.format(file_tag))
 
 ## Set up the geometry of the run ##
@@ -73,9 +73,47 @@ y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2)
 z_basis = de.Chebyshev('z', Nz, interval = (-Lz/2,Lz/2), dealias =3/2)
 domain = de.Domain([x_basis, y_basis, z_basis], grid_dtype=np.float64, comm=comm, mesh=mesh)
 
+###############################################################################################
+## The code that will implement the hyperdiffusion scheme, will try a general function first ##
+###############################################################################################
+
+hyperDiffusionField = domain.new_field(name = 'HD') ## Define a field in dedalus
+
+## Define a matrix the same size as the spectral matrix
+hyperDiffusionMatrix = np.ones(np.shape(hyperDiffusionField['c']), dtype = float)
+
+def createHyperDifussionMatrix(matrix, k_0 = 12, q = 1.05):
+    '''
+        A function which fills the hyperDiffusionMatrix with the correct values for that given scheme.
+    '''
+    for i in range(np.shape(matrix)[0]):
+            for j in range(np.shape(matrix)[1]):
+                    for k in range(np.shape(matrix)[2]):
+                        if (i**2 + j**2)**0.5 > k_0:
+                            matrix[i][j][k] = q**((i**2 + j**2)**0.5 - k_0)
+
+createHyperDifussionMatrix(hyperDiffusionMatrix)
+
+
+def hyperDiffusionFunction(field):
+    return field.data*hyperDiffusionMatrix
+
+def hyperDiffusionOperator(field):
+    return de.operators.GeneralFunction(
+        field.domain,
+        layout = 'c',
+        func = hyperDiffusionFunction,
+        args = (field,)
+    )
+
+de.operators.parseables['HD'] = hyperDiffusionOperator
+
+###############################################################################################
+###############################################################################################
+
 ## Parameters ##
 problem = de.IVP(domain, variables = ['p','T','u','v','w','Tz','uz','vz','wz'])
-problem.meta['p','T','u','v','w']['z']['dirichlet']=True
+problem.meta['p','T','u','v','w']['z']['dirichlet'] = True
 problem.parameters['Ra'] = Rayleigh
 problem.parameters['Ek'] = Ekman
 problem.parameters['Pr'] = Prandtl
@@ -87,8 +125,10 @@ problem.parameters['Lz'] = Lz
 ## Governing Equations ##
 problem.add_equation("dx(u) + dy(v) + wz = 0")
 problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v*dy(T) + w*Tz)")
-problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v  = -(u*dx(u) + v*dy(u) + w*uz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs 
-problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u  = -(u*dx(v) + v*dy(v) + w*vz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs
+
+problem.add_equation("dt(u) + dx(p) - Pr*dy(dy(u)) - Pr*dz(uz) - (Pr/Ek)*v = HD(Pr*dx(dx(u))) - (u*dx(u) + v*dy(u) + w*uz)") 
+
+problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u = -(u*dx(v) + v*dy(v) + w*vz)") 
 problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
 
 problem.add_equation("Tz - dz(T) = 0")
