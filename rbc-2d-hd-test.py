@@ -57,7 +57,7 @@ i_0 = float(args['--i_0'])
 
 
 ## Create the file tag to make a unique directory ##
-file_tag="Ra_{:.2e}_Pr_{}_N_{}_".format(Rayleigh,Prandtl,N)
+file_tag="Ra_{:.2e}_Pr_{}_N_{}_q_{}_i_{}_".format(Rayleigh,Prandtl,N,q,i_0)
 file_tag=file_tag.replace(".","-")
 
 if comm.rank==0:
