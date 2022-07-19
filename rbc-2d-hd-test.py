@@ -17,6 +17,8 @@ Options:
     --pr=<prandtl>      Prandtl number [default: 1]
     --mesh=<mesh>       Parallel mesh [default: None]
 """
+
+
 ## Import libraries ##
 import numpy as np
 from mpi4py import MPI
@@ -92,9 +94,15 @@ createHyperDifussionMatrix(hyperDiffusionMatrix)
 
 
 def hyperDiffusionFunction(field):
+    '''
+        A function which multiplies the hyperdiffusion matrix and field matrix together.
+    '''
     return field.data*hyperDiffusionMatrix
 
 def hyperDiffusionOperator(field):
+    '''
+        A function which constructe the operator to be called in the equations
+    '''
     return de.operators.GeneralFunction(
         field.domain,
         layout = 'c',
@@ -151,9 +159,9 @@ pert =  1e-6 * noise * (zt - z) * (z - zb)
 Θ['g'] = 0.1*(z - pert)
 
 ## Integration parameters ##
-sim_end_time=5
-max_iterations=1000000
-sim_wall_time=24*60*60
+sim_end_time = 5
+max_iterations = 1000000
+sim_wall_time = 24*60*60
 
 
 ## Snapshots of the entire domain, only saves 10 for memory ##
