@@ -82,7 +82,7 @@ hyperDiffusionField = domain.new_field(name = 'HD') ## Define a field in dedalus
 ## Define a matrix the same size as the spectral matrix
 hyperDiffusionMatrix = np.ones(np.shape(hyperDiffusionField['c']), dtype = float)
 
-def createHyperDifussionMatrix(matrix, k_0 = 12, q = 1.05):
+def createHyperDifussionMatrix(matrix, k_0 = 12, q = 1):
     '''
         A function which fills the hyperDiffusionMatrix with the correct values for that given scheme.
     '''
@@ -126,15 +126,18 @@ problem.parameters['Lz'] = Lz
 problem.add_equation("dx(u) + dy(v) + wz = 0")
 problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v*dy(T) + w*Tz)")
 
-problem.add_equation("dt(u) + dx(p) - Pr*dy(dy(u)) - Pr*dz(uz) - (Pr/Ek)*v = HD(Pr*dx(dx(u))) - (u*dx(u) + v*dy(u) + w*uz)") 
 
-problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u = -(u*dx(v) + v*dy(v) + w*vz)") 
-problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
+#problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v = - (u*dx(u) + v*dy(u) + w*uz)") 
+
+problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + Pr*dz(uz)) - (Pr/Ek)*v = - (u*dx(u) + v*dy(u) + w*uz)") 
+problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u =   - (u*dx(v) + v*dy(v) + w*vz)") 
+problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T =  -( u*dx(w) + v*dy(w) +w*wz)")
 
 problem.add_equation("Tz - dz(T) = 0")
 problem.add_equation("uz - dz(u) = 0")
 problem.add_equation("vz - dz(v) = 0")
 problem.add_equation("wz - dz(w) = 0")
+
 
 ## Boundary conditions ##
 problem.add_bc("left(T) = 0")
