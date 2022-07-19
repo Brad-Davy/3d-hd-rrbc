@@ -5,7 +5,8 @@
    direction. The top and bottom boundaries are set to no slip.
 
 Usage:
-    2d-rbc.py [--ra=<rayleigh>] [--N=<resolution>] [--max_dt=<maximum_dt] [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>]
+    2d-rbc.py [--ra=<rayleigh>] [--N=<resolution>] [--max_dt=<maximum_dt] [--init_dt=<Initial_dt>] 
+    [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--i_0=<i_0>]
     2d-rbc.py -h | --help
 
 Options:
@@ -14,6 +15,8 @@ Options:
     --N=<resolution>    Nx=2Nz [default: 256]
     --max_dt=<max_dt>   Maximum Time step [default: 1e-5]
     --init_dt=<init_dt> Initial Time step [default: 1-e8]
+    --q=<q>             Hyperdiffusion parameter [default: 1.08]
+    --i_0=<i_0>         Hyperdiffusion parameter [default: 100]
     --pr=<prandtl>      Prandtl number [default: 1]
     --mesh=<mesh>       Parallel mesh [default: None]
 """
@@ -49,6 +52,8 @@ max_dt = float(args['--max_dt'])
 ## Take the input arguments from Docopt ##
 Rayleigh = float(args['--ra'])
 Prandtl = float(args['--pr'])
+q = float(args['--q'])
+i_0 = float(args['--i_0'])
 
 
 ## Create the file tag to make a unique directory ##
@@ -81,7 +86,7 @@ problem = de.IVP(domain, variables=['p','Θ','u','w','Θz','uz','wz'], time='t')
 coeffShape = domain.global_coeff_shape
 hyperDiffusionMatrix = np.ones((coeffShape[0],coeffShape[1]), dtype = float)
 
-def createHyperDifussionMatrix(matrix, i_0 = 100, q = 1.01):
+def createHyperDifussionMatrix(matrix, i_0 = i_0, q = q):
     '''
         A function which fills the hyperDiffusionMatrix with the correct values for that given scheme.
     '''
