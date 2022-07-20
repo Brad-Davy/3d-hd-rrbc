@@ -9,10 +9,10 @@ Options:
     --ra=<rayliegh>         Rayleigh number [default: 1e5]
     --ek=<ekman>            Ekman number [default: 1e-1]
     --N=<resolution>        Nx=Ny=2Nz [default: 32]
-    --max_dt=<Maximum_dt>   Maximum Time Step [default: 1e-3]
+    --max_dt=<Maximum_dt>   Maximum Time Step [default: 1e-5]
     --pr=<prandtl>          Prandtl number [default: 7]
     --mesh=<mesh>           Parallel mesh [default: None]
-    --init_dt=<Initial_dt>  Initial Time Step [default: 1e-3]
+    --init_dt=<Initial_dt>  Initial Time Step [default: 1e-5]
 """
 
 from mpi4py import MPI
@@ -129,9 +129,9 @@ problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v
 
 #problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v = - (u*dx(u) + v*dy(u) + w*uz)") 
 
-problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + Pr*dz(uz)) - (Pr/Ek)*v = - (u*dx(u) + v*dy(u) + w*uz)") 
-problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u =   - (u*dx(v) + v*dy(v) + w*vz)") 
-problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T =  -( u*dx(w) + v*dy(w) +w*wz)")
+problem.add_equation("dt(u) + dx(p) - Pr*dz(uz) - (Pr/Ek)*v = HD(Pr*(dx(dx(u)) + dy(dy(u)))) - (u*dx(u) + v*dy(u) + w*uz)") 
+problem.add_equation("dt(v) + dy(p) - Pr*dz(vz) + (Pr/Ek)*u = HD(Pr*(dx(dx(v)) + dy(dy(v))))  - (u*dx(v) + v*dy(v) + w*vz)") 
+problem.add_equation("dt(w) + dz(p) - Pr*dz(wz) - Ra*Pr*T =  HD(Pr*(dx(dx(w)) + dy(dy(w)))) -( u*dx(w) + v*dy(w) +w*wz)")
 
 problem.add_equation("Tz - dz(T) = 0")
 problem.add_equation("uz - dz(u) = 0")
