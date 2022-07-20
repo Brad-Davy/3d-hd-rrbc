@@ -1,7 +1,7 @@
 """Dedalus simulation of 3d Rayleigh benard rotating convection.
 
 Usage:
-    3d-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>]
+    3d-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>]
     3d-rrbc.py -h | --help
 
 Options:
@@ -13,6 +13,8 @@ Options:
     --pr=<prandtl>          Prandtl number [default: 7]
     --mesh=<mesh>           Parallel mesh [default: None]
     --init_dt=<Initial_dt>  Initial Time Step [default: 1e-5]
+    --q=<q>                 Hyperdiffusion parameter [default: 1]
+    --k_0=<k_0>             Hyperdiffusion parameter [default: 10]
 """
 
 from mpi4py import MPI
@@ -46,6 +48,8 @@ Ekman = float(args['--ek'])
 Prandtl = float(args['--pr'])
 max_dt = float(args['--max_dt'])
 init_dt = float(args['--init_dt'])
+q = float(args['--q'])
+k_0 = int(args['--k_0'])
 
 ## Format the mesh input ##
 if args['--mesh']!="None":
@@ -59,7 +63,7 @@ max_iterations = 1000000
 sim_wall_time = 24*60*60*2 ## Run the simulation for 2 days ##
 
 ## Set the file names ##
-file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_".format(Rayleigh,Ekman,Prandtl,N)
+file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_q_{}_k_{}_".format(Rayleigh,Ekman,Prandtl,N,q,k_0)
 file_tag=file_tag.replace(".","-")
 
 ## Make the directory to save the output files ##
