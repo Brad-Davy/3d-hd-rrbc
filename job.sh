@@ -13,4 +13,4 @@ conda activate dedalus
 
 cd /nobackup/scbd/PhD/Year1/Dedalus/3D/rotatingRBC/Perturbation/functionalHyperDiffusion
 #export OMP_NUM_THREADS=1
-mpiexec python3 3d-rrbc.py --ra=3.45e7 --ek=1e-5 --N=256 --max_dt=5e-4 --init_dt=1e-8 --mesh=32,32
+mpiexec python3 3d-hd-rrbc.py --ra=3.45e7 --ek=1e-5 --N=256 --max_dt=5e-4 --init_dt=1e-8 --mesh=32,32

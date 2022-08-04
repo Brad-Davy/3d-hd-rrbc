@@ -56,6 +56,8 @@ Ekman = float(args['--ek'])
 Prandtl = float(args['--pr'])
 max_dt = float(args['--max_dt'])
 init_dt = float(args['--init_dt'])
+q = float(args['--q'])
+k_0 = int(args['--k_0'])
 
 # =============================================================================
 # Format the mesh input
@@ -78,7 +80,7 @@ sim_wall_time = 24*60*60*24
 # Set the file names 
 # =============================================================================
 
-file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_".format(Rayleigh,Ekman,Prandtl,N)
+file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_q_{}_k_{}_".format(Rayleigh,Ekman,Prandtl,N,q,k_0)
 file_tag=file_tag.replace(".","-")
 
 # =============================================================================
@@ -93,8 +95,8 @@ if comm.rank==0:
 # =============================================================================
 
 start_init_time = time.time()
-x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2)
-y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2)
+x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2, hyp = q, cutoff = k_0)
+y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2, hyp = q, cutoff = k_0)
 z_basis = de.Chebyshev('z', Nz, interval = (-Lz/2,Lz/2), dealias =3/2)
 domain = de.Domain([x_basis, y_basis, z_basis], grid_dtype=np.float64, comm=comm, mesh=mesh)
 
@@ -127,9 +129,9 @@ problem.substitutions['w_3_z'] = "dz(w_3)"
 
 problem.add_equation("dx(u) + dy(v) + wz = 0")
 problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v*dy(T) + w*Tz)")
-problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v  = -(u*dx(u) + v*dy(u) + w*uz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs 
-problem.add_equation("dt(v) + dy(p) - Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz)) + (Pr/Ek)*u  = -(u*dx(v) + v*dy(v) + w*vz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs
-problem.add_equation("dt(w) + dz(p) - Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
+problem.add_equation("dt(u) + dx(p) - Pr*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) - (Pr/Ek)*v  = -(u*dx(u) + v*dy(u) + w*uz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs 
+problem.add_equation("dt(v) + dy(p) - Pr*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + (Pr/Ek)*u  = -(u*dx(v) + v*dy(v) + w*vz)") ## Note that a 2 has been added to the coriolis term to match (Schmitz et al, 2010) take this out of further runs
+problem.add_equation("dt(w) + dz(p) - Pr*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
 
 problem.add_equation("Tz - dz(T) = 0")
 problem.add_equation("uz - dz(u) = 0")
@@ -201,7 +203,7 @@ snap.add_task("u*u + v*v + w*w", layout = 'c', name = 'kinetic_spectrum')
 # =============================================================================
 
 snap.add_task("-dx(p)", name = 'x_pressure')
-snap.add_task("Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz))", name = 'x_diffusion')
+snap.add_task("Pr*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz))", name = 'x_diffusion')
 snap.add_task("(Pr/Ek)*v", name = 'x_coriolis')
 snap.add_task("-(u*dx(u) + v*dy(u) + w*uz)", name = 'x_inertia')
 
@@ -210,7 +212,7 @@ snap.add_task("-(u*dx(u) + v*dy(u) + w*uz)", name = 'x_inertia')
 # =============================================================================
 
 snap.add_task("-dy(p)", name = 'y_pressure')
-snap.add_task("Pr*(dx(dx(v)) + dy(dy(v)) + dz(vz))", name = 'y_diffusion')
+snap.add_task("Pr*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz))", name = 'y_diffusion')
 snap.add_task("-(Pr/Ek)*u", name = 'y_coriolis')
 snap.add_task("-(u*dx(v) + v*dy(v) + w*vz)", name = 'y_inertia')
 
@@ -219,7 +221,7 @@ snap.add_task("-(u*dx(v) + v*dy(v) + w*vz)", name = 'y_inertia')
 # =============================================================================
 
 snap.add_task("-dz(p)", name = 'z_pressure')
-snap.add_task("Pr*(dx(dx(w)) + dy(dy(w)) + dz(wz))", name = 'z_diffusion')
+snap.add_task("Pr*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz))", name = 'z_diffusion')
 snap.add_task("-(u*dx(w) + v*dy(w) + w*wz)", name = 'z_inertia')
 snap.add_task("Ra*Pr*T", name = 'z_bouyancy')
 
@@ -234,7 +236,7 @@ snap.add_task("Ra*Pr*T", name = 'z_bouyancy')
 # Vorticity x-equation
 # =============================================================================
 
-snap.add_task("Pr*(dx(dx(w_1)) + dy(dy(w_1)) + dz(w_1_z))", name = 'vorticity_x_diffusion')
+snap.add_task("Pr*(hdx(hdx(w_1)) + hdy(hdy(w_1)) + dz(w_1_z))", name = 'vorticity_x_diffusion')
 snap.add_task("-(Pr/Ek)*uz", name = 'vorticity_x_coriolis')
 snap.add_task("Ra*Pr*dy(T)", name = 'vorticity_x_bouyancy')
 snap.add_task("-(u*dx(w_1) + v*dy(w_1) + w*w_1_z)", name = 'vorticity_x_inertia')
@@ -243,7 +245,7 @@ snap.add_task("-(u*dx(w_1) + v*dy(w_1) + w*w_1_z)", name = 'vorticity_x_inertia'
 # Vorticity y-equation
 # =============================================================================
 
-snap.add_task("Pr*(dx(dx(w_2)) + dy(dy(w_2)) + dz(w_2_z))", name = 'vorticity_y_diffusion')
+snap.add_task("Pr*(hdx(hdx(w_2)) + hdy(hdy(w_2)) + dz(w_2_z))", name = 'vorticity_y_diffusion')
 snap.add_task("-(Pr/Ek)*vz", name = 'vorticity_y_coriolis')
 snap.add_task("-Ra*Pr*dx(T)", name = 'vorticity_y_bouyancy')
 snap.add_task("-(u*dx(w_2) + v*dy(w_2) + w*w_2_z)", name = 'vorticity_y_inertia')
@@ -252,7 +254,7 @@ snap.add_task("-(u*dx(w_2) + v*dy(w_2) + w*w_2_z)", name = 'vorticity_y_inertia'
 # Vorticity z-equation
 # =============================================================================
 
-snap.add_task("Pr*(dx(dx(w_3)) + dy(dy(w_3)) + dz(w_3_z))", name = 'vorticity_z_diffusion')
+snap.add_task("Pr*(hdx(hdx(w_3)) + hdy(hdy(w_3)) + dz(w_3_z))", name = 'vorticity_z_diffusion')
 snap.add_task("-(u*dx(w_3) + v*dy(w_3) + w*w_3_z)", name = 'vorticity_z_inertia')
 snap.add_task("(Pr/Ek)*wz", name = 'vorticity_z_coriolis')
 
