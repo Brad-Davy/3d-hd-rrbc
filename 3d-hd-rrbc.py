@@ -13,8 +13,8 @@ Options:
     --pr=<prandtl>          Prandtl number [default: 7]
     --mesh=<mesh>           Parallel mesh [default: None]
     --init_dt=<Initial_dt>  Initial Time Step [default: 1e-5]
-    --q=<q>                 Hyperdiffusion parameter [default: 1]
-    --k_0=<k_0>             Hyperdiffusion parameter [default: 10]
+    --q=<q>                 Hyperdiffusion parameter [default: 1.08]
+    --k_0=<k_0>             Hyperdiffusion parameter [default: 40]
 """
 
 from mpi4py import MPI
@@ -26,6 +26,9 @@ from dedalus.extras import flow_tools
 from docopt import docopt
 import logging
 import os
+from dedalusHyperDiffusion import hyperDiffusion
+
+
 logger = logging.getLogger(__name__)
 
 ## Setting up Docopt ##
@@ -35,10 +38,10 @@ comm = MPI.COMM_WORLD
 ## Pull the number of spectral modes from the input ##
 N = int(args['--N'])
 Nx = Ny = N
-Nz = N#int(N/2)
+Nz = int(N/2)
 
 ## Set the aspect ratio ##
-Lx = Ly = 1
+Lx = Ly = 2
 Lz = 1
 
 
@@ -72,48 +75,11 @@ if comm.rank == 0:
 
 ## Set up the geometry of the run ##
 start_init_time = time.time()
-x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2)
-y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2)
+x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2, hyp = q, cutoff = k_0)
+y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2, hyp = q, cutoff = k_0)
 z_basis = de.Chebyshev('z', Nz, interval = (-Lz/2,Lz/2), dealias =3/2)
 domain = de.Domain([x_basis, y_basis, z_basis], grid_dtype=np.float64, comm=comm, mesh=mesh)
 
-###############################################################################################
-## The code that will implement the hyperdiffusion scheme, will try a general function first ##
-###############################################################################################
-
-hyperDiffusionField = domain.new_field(name = 'HD') ## Define a field in dedalus
-
-## Define a matrix the same size as the spectral matrix
-hyperDiffusionMatrix = np.ones(np.shape(hyperDiffusionField['c']), dtype = float)
-
-def createHyperDifussionMatrix(matrix, k_0 = 12, q = 1):
-    '''
-        A function which fills the hyperDiffusionMatrix with the correct values for that given scheme.
-    '''
-    for i in range(np.shape(matrix)[0]):
-            for j in range(np.shape(matrix)[1]):
-                    for k in range(np.shape(matrix)[2]):
-                        if (i**2 + j**2)**0.5 > k_0:
-                            matrix[i][j][k] = q**((i**2 + j**2)**0.5 - k_0)
-
-createHyperDifussionMatrix(hyperDiffusionMatrix)
-
-
-def hyperDiffusionFunction(field):
-    return field.data*hyperDiffusionMatrix
-
-def hyperDiffusionOperator(field):
-    return de.operators.GeneralFunction(
-        field.domain,
-        layout = 'c',
-        func = hyperDiffusionFunction,
-        args = (field,)
-    )
-
-de.operators.parseables['HD'] = hyperDiffusionOperator
-
-###############################################################################################
-###############################################################################################
 
 ## Parameters ##
 problem = de.IVP(domain, variables = ['p','T','u','v','w','Tz','uz','vz','wz'])
@@ -125,17 +91,16 @@ problem.parameters['Lx'] = Lx
 problem.parameters['Ly'] = Ly
 problem.parameters['Lz'] = Lz
 
+de.operators.parseables['hyperDiffusion'] = hyperDiffusion
+problem.substitutions['Hyp'] = "hyperDiffusion"
+
 
 ## Governing Equations ##
 problem.add_equation("dx(u) + dy(v) + wz = 0")
 problem.add_equation("dt(T) - (dx(dx(T)) + dy(dy(T)) + dz(Tz)) = w -(u*dx(T) + v*dy(T) + w*Tz)")
-
-
-#problem.add_equation("dt(u) + dx(p) - Pr*(dx(dx(u)) + dy(dy(u)) + dz(uz)) - (Pr/Ek)*v = - (u*dx(u) + v*dy(u) + w*uz)") 
-
-problem.add_equation("dt(u) + dx(p) - Pr*dz(uz) - (Pr/Ek)*v = HD(Pr*(dx(dx(u)) + dy(dy(u)))) - (u*dx(u) + v*dy(u) + w*uz)") 
-problem.add_equation("dt(v) + dy(p) - Pr*dz(vz) + (Pr/Ek)*u = HD(Pr*(dx(dx(v)) + dy(dy(v))))  - (u*dx(v) + v*dy(v) + w*vz)") 
-problem.add_equation("dt(w) + dz(p) - Pr*dz(wz) - Ra*Pr*T =  HD(Pr*(dx(dx(w)) + dy(dy(w)))) -( u*dx(w) + v*dy(w) +w*wz)")
+problem.add_equation("dt(u) + dx(p) - Pr*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) - (Pr/Ek)*v  = -(u*dx(u) + v*dy(u) + w*uz)") ## Note$
+problem.add_equation("dt(v) + dy(p) - Pr*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + (Pr/Ek)*u  = -(u*dx(v) + v*dy(v) + w*vz)") ## Note$
+problem.add_equation("dt(w) + dz(p) - Pr*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)) - Ra*Pr*T = -(u*dx(w) + v*dy(w) +w*wz)")
 
 problem.add_equation("Tz - dz(T) = 0")
 problem.add_equation("uz - dz(u) = 0")
