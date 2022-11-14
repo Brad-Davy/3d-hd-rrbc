@@ -1,20 +1,22 @@
-"""Dedalus simulation of 3d Rayleigh benard rotating convection.
+""" Dedalus simulation of 3d Rayleigh benard rotating convection.
 
 Usage:
-    3d-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>]
-    3d-rrbc.py -h | --help
+    3d-hd-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>] [--e_z=<enhanced_z>]
+    3d-hd-rrbc.py -h | --help
 Options:
-    --h --help               Display this help message
-    --ra=<rayliegh>         Rayleigh number [default: 1e5]
-    --ek=<ekman>            Ekman number [default: 1e-1]
-    --N=<resolution>        Nx=Ny=2Nz [default: 32]
-    --max_dt=<Maximum_dt>   Maximum Time Step [default: 1e-5]
+    -h --help               Display this help message
+    --ra=<rayliegh>         Rayleigh number [default: 3.3e5]
+    --ek=<ekman>            Ekman number [default: 1e-3]
+    --N=<resolution>        Nx=Ny=2Nz [default: 64]
+    --max_dt=<Maximum_dt>   Maximum Time Step [default: 1e-3]
     --pr=<prandtl>          Prandtl number [default: 7]
     --mesh=<mesh>           Parallel mesh [default: None]
-    --init_dt=<Initial_dt>  Initial Time Step [default: 1e-5]
-    --q=<q>                 Hyperdiffusion parameter [default: 1.08]
-    --k_0=<k_0>             Hyperdiffusion parameter [default: 40]
+    --init_dt=<Initial_dt>  Initial Time Step [default: 1e-3]
+    --q=<q>                 Hyperdiffusion parameter [default: 1.05]
+    --k_0=<k_0>             Hyperdiffusion parameter [default: 32]
+    --e_z=<enhanced_z>      Enhanced number of nodes in z  [default: 0]
 """
+
 from mpi4py import MPI
 import matplotlib.pyplot as plt
 import numpy as np
@@ -38,8 +40,17 @@ comm = MPI.COMM_WORLD
 # =============================================================================
 
 N = int(args['--N'])
+enhancedZ = int(args['--e_z'])
 Nx = Ny = N
-Nz = int(N/2)
+
+if enhancedZ == 0:
+    Nz = int(N/2)
+
+elif enhancedZ == 1:
+    Nz = N
+   
+else:
+    raise Exception('Please specify the number of nodes in z.')
 
 # =============================================================================
 # Set the aspect ratio 
@@ -81,8 +92,14 @@ sim_wall_time = 24*60*60*24
 # Set the file names 
 # =============================================================================
 
-file_tag="Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_q_{}_k_{}_".format(Rayleigh,Ekman,Prandtl,N,q,k_0)
-file_tag=file_tag.replace(".","-")
+if enhancedZ == 0:
+    file_tag = "Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_q_{}_k_{}_".format(Rayleigh,Ekman,Prandtl,N,q,k_0)
+
+elif enhancedZ == 1:
+    file_tag = "Ra_{:.2e}_Ek_{:.2e}_Pr_{}_N_{}_q_{}_k_{}_enhanced".format(Rayleigh,Ekman,Prandtl,N,q,k_0)
+
+file_tag = file_tag.replace(".","-")
+
 
 # =============================================================================
 # Make the directory to save the output files
@@ -153,7 +170,9 @@ problem.add_bc("right(v) = 0")
 problem.add_bc("right(w) = 0", condition="(nx != 0)")
 problem.add_bc("integ_z(p) = 0", condition="(nx == 0)")
 
-
+# =============================================================================
+# Build the solver
+# =============================================================================
 
 solver = problem.build_solver("RK443")
 logger.info('Solver built')
@@ -260,6 +279,15 @@ snap.add_task("-(u*dx(w_3) + v*dy(w_3) + w*w_3_z)", name = 'vorticity_z_inertia'
 snap.add_task("(Pr/Ek)*wz", name = 'vorticity_z_coriolis')
 
 # =============================================================================
+# Energy equation
+# =============================================================================
+
+snap.add_task("-u*(u*dx(u) + v*dy(u) + w*uz) - v*(u*dx(v) + v*dy(v) + w*vz) - w*(u*dx(w) + v*dy(w) + w*wz)", name = 'inertia_energy')
+snap.add_task("Ra*Pr*w*T", name = 'buoyancy_energy')
+snap.add_task("-u*dx(p) - v*dy(p) - w*dz(p)", name = 'pressure_energy')
+snap.add_task("Pr*( u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)) )", name = 'diffusion_energy')
+
+# =============================================================================
 # Dedalus analysis files containing integral properties of the system
 # =============================================================================
 
@@ -277,10 +305,10 @@ analysis.add_task("(1/Lx)*integ((1/Ly)*integ( sqrt(w*w),'y'),'x')", name = "w_pr
 analysis.add_task("sqrt((1/Lx)*integ((1/Ly)*integ(u*u + v*v + w*w,'y'),'x'))", name = "Pe_prof")
 analysis.add_task("(1/Pr)*(1/Lx)*integ((1/Ly)*integ( sqrt(u*u + v*v + w*w),'y'),'x')", name = "Re_prof")
 analysis.add_task("(1/Lx)*integ((1/Ly)*integ( sqrt(u*u + v*v),'y'),'x')", name = "U_H_prof")
-analysis.add_task("-(1/(Lz*Lx*Ly))*integ(u*(dx(dx(u))+dy(dy(u))+dz(uz))+ v*(dx(dx(v))+dy(dy(v))+dz(vz)) + w*(dx(dx(w))+dy(dy(w))+dz(wz)))", name = "dissip")
-#analysis.add_task("(1/Lz)*integ((1/Ly)*integ((1/Lx)*integ( Ra * w * T,'x'),'y'),'z')",name = "buoyancy")
-analysis.add_task("(Ra/(Lx*Ly*Lz))*integ(w*T - dz(T))",name = "buoyancy")
-analysis.add_task("(1/(Lz*Ly*Lx))*integ((dy(w)-vz)**2 + (uz-dx(w))**2 + (dx(v)-dy(u))**2)", name = "D_visc")
+
+analysis.add_task("-(Pr/(Lz*Lx*Ly))*integ(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w))+dz(wz)))", name = "dissip")
+analysis.add_task("(Ra*Pr/(Lz*Lz*Ly))*integ(T*w)",name = "buoyancy")
+
 analysis.add_task("z", name = "z")
 analysis.add_task("(1/(Lx*Ly))*integ(integ( Tz,'x'),'y')", name = "conduction_prof")
 analysis.add_task("(1/(Lx*Ly))*integ(integ( w*T,'x'),'y')", name = "advection_prof")
@@ -308,10 +336,8 @@ flow.add_property("interp((1/(Ly))*integ((1/Lx)*integ(-dz(T) ,'x'),'y') , z = 0.
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=-0.5)", name = "T_bot")
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=0.5)", name = "T_top")
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=0)", name = "T_mid")
-flow.add_property("-(1/(Lz*Ly*Lx))*integ(u*(dx(dx(u))+dy(dy(u))+dz(uz)) + v*(dx(dx(v))+dy(dy(v))+dz(vz)) + w*(dx(dx(w))+dy(dy(w))+dz(wz)))", name = "dissip")
-#flow.add_property("(1/Lz)*integ((1/Ly)*integ((1/Lx)*integ( Ra * w * T,'x'),'y'),'z')",name = "buoyancy")
-flow.add_property("(Ra/(Lx*Ly*Lz))*integ(w*T - dz(T))",name = "buoyancy")
-flow.add_property("(1/Lz)*integ((1/Ly)*integ((1/Lx)*integ((dy(w)-vz)**2 + (uz-dx(w))**2 + (dx(v)-dy(u))**2,'x'),'y'),'z')", name = "D_visc")
+flow.add_property("-(1/(Lz*Ly*Lx))*integ(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)))", name = "dissip")
+flow.add_property("(Ra*Pr/(Lz*Lz*Ly))*integ(T*w)",name = "buoyancy")
 flow.add_property("u", name = 'u')
 flow.add_property('v', name = 'v')
 flow.add_property('w', name = 'w')
@@ -343,9 +369,9 @@ try:
         solver.step(dt)
         if (solver.iteration-1) % 10 == 0:
             logger.info(" ")
-            logger.info("-"*60)
-            logger.info("Ra:{:.4e}, Ek:{:.4e}, Pr:{:.4e}, N:{}".format(Rayleigh, Ekman, Prandtl, N))
-            logger.info("-"*60)
+            logger.info("-"*80)
+            logger.info("Ra:{:.4e}, Ek:{:.4e}, Pr:{:.4e}, N:{}, q:{}, k_0:{}, enhanced:{}".format(Rayleigh, Ekman, Prandtl, N, q, k_0, enhancedZ == True))
+            logger.info("-"*80)
             logger.info('Iteration: %i, Time: %e, dt: %e, Convective time: %f' %(solver.iteration, solver.sim_time, dt,solver.sim_time*np.sqrt(Rayleigh*Prandtl)))
             logger.info("Re:{:.4e}, Pe:{:.4f}, Max T:{:.4f}, Max P:{:.4e}".format(flow.max('Re'), flow.max('Pe'), flow.max('temperature'), flow.max('pressure')))
             nu_bot = flow.max('nu_bot_wall')
@@ -362,20 +388,19 @@ try:
             t_mid = flow.max('T_mid')
             uu = flow.max('u')
             vv = flow.max('v')
-            ww= flow.max('w')
-            dissip = flow.max('dissip')
+            ww = flow.max('w')
+            viscousDissipation = flow.max('dissip')
             T_dissip = flow.max('thermal_dissipation')
-            D_visc = flow.max('D_visc')
             buoyancy = flow.max('buoyancy')
-            balance = np.abs(dissip - buoyancy)/np.abs(dissip)
+            balance = np.abs(viscousDissipation - buoyancy)/np.abs(viscousDissipation)
             nu_balance = np.amax( [np.abs(nu_bot-nu_top)/np.abs(nu_top), np.abs(nu_bot-nu_int)/np.abs(nu_int), np.abs(nu_top-nu_int)/np.abs(nu_int)] )
             logger.info('Nusselt midplane={:.4f}, nu_top={:.4f}, nu_bottom={:.4f}, nu_integral={:.4f}, Nu_error:{:.4e}, Thermal Dissipation = {:.4f}'.format(flow.max('nu_mid_plane'),flow.max('nu_top_wall'),flow.max('nu_bot_wall'),flow.max('nu_integral'),nu_balance, flow.max('thermal_dissipation')))
             logger.info('u:{:.4e}, v:{:.4e}, w:{:.4e}'.format(uu,vv,ww))
-            logger.info('buoyancy:{:5.4e}, dissipation:{:5.4e}, balance:{:.3f}%'.format(buoyancy,dissip,100*balance))
+            logger.info('buoyancy:{:5.4e}, dissipation:{:5.4e}, balance:{:.3f}%'.format(buoyancy, viscousDissipation, 100*balance))
             logger.info('Thermal Balance = {:.3f}%.'.format(100*((nu_int - flow.max('thermal_dissipation'))/flow.max('thermal_dissipation'))))
             if comm.rank==0:
                 output_file = open('results/{}/{}log.txt'.format(file_tag,file_tag),'a')
-                output_file.write("{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t\n".format(sim_time, reynolds, nu_top,nu_bot,nu_mid, nu_int,uu,vv,ww,buoyancy,dissip,balance,nu_balance,T_dissip,D_visc))
+                output_file.write("{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t\n".format(sim_time, reynolds, nu_top,nu_bot, nu_mid, nu_int, uu, vv, ww, buoyancy, viscousDissipation, balance, nu_balance, T_dissip))
                 output_file.close()
 except:
     logger.error('Exception raised, triggering end of main loop.')
