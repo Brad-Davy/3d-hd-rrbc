@@ -22,12 +22,13 @@ from colours import*
 import subprocess
 
 # =============================================================================
-# Extract the docopt arguments 
+# Extract the docopt arguments, not that the transient refers to convective
+# overturn time units.
 # =============================================================================
 
 args = docopt(__doc__)
 dir = str(args['--dir'])
-transient = int(args['--t'])
+nConvectiveTimeUnits = int(args['--t'])
 fig_bool = int(args['--fig'])
 snap_t = int(args['--snap_t'])
 
@@ -44,7 +45,7 @@ else:
 # Define some empty lists which shall store data for later
 # =============================================================================
 
-ThermalBoundary = []
+nConvectiveTimeUnitsThermalBoundary = []
 ViscousBoundary = []
 Points_in_thermal_boundary = []
 Points_in_viscous_Boundary = []
@@ -62,7 +63,7 @@ v_max = []
 w_max = []
 Buoyancy = []
 Dissipation = []
-Energy_Balance = []
+energyBalance = []
 D_viscosity = []
 upper_thermal_boundary = []
 
@@ -99,6 +100,7 @@ fileName = dir + '/' + onlyfiles[0]
 logFile = open(fileName, 'r')
 logFileContents = logFile.read().split('\n')
 
+
 # =============================================================================
 # Check if an image directory already exsists, if not create one
 # =============================================================================
@@ -126,24 +128,45 @@ for idx,lines in enumerate(logFileContents):
             w_max.append(float(lines.split()[8]))
             Buoyancy.append(float(lines.split()[9]))
             Dissipation.append(14*float(lines.split()[10]))
-            Energy_Balance.append(float(lines.split()[11]))
             Nu_Error.append(float(lines.split()[12]))
             D_viscosity.append(14*float(lines.split()[13]))
         except:
             pass
 
+
 # =============================================================================
 # Extract the energy balance from the log file
 # =============================================================================
 
-E_B = np.array(Energy_Balance)
-E_B[E_B == np.inf] = 0
-Energy_Balance = E_B[np.logical_not(np.isnan(E_B))]
-Balance = np.average(Energy_Balance[-transient:])*100
-logFile.close()
+averagedPecletNumber = np.average(Re[-500:]) * 7
+convectiveTime = np.array(Time) * averagedPecletNumber
+transientSet = False
 
 
-## Deal with the analysis tasks to calculate boundary layers ##
+
+for idx, lines in enumerate(convectiveTime[::-1]):
+    if (max(convectiveTime) - lines) > nConvectiveTimeUnits:
+        transient = idx
+        transientSet = True
+        break
+
+print(transient)
+if transientSet == False:
+    raise Exception('Please choose a valid transient')
+    
+
+for idx,lines in enumerate(Dissipation):
+    if idx > transient:
+        try:
+            energyBalance.append(100*(abs(lines - 7*Buoyancy[idx]) / (7*Buoyancy[idx])))
+        except:
+            pass
+Balance = np.average(energyBalance)
+
+# =============================================================================
+# Deal with the analysis tasks to calculate boundary layers
+# =============================================================================
+ 
 analysis_file = os.listdir(dir)
 
 for idx,lines in enumerate(os.listdir(dir)):
@@ -204,7 +227,7 @@ T_rms_prof = np.zeros(len(z))
 for idxt,time_step in enumerate(T):
     if idxt >= 0:
         for idx,lines in enumerate(np.rot90(time_step, k = 3, axes = (0,2))):
-            T_rms_prof[idx] += np.average(np.sqrt((lines - avg_T_prof[idx]*np.ones(np.shape(lines)))**2))
+            T_rms_prof[idx] += np.average(np.sqrt((lines - avg_T_prof[idx]*np.ones(np.shape(lines)))**2)) / snap_t
 
 
 with open('{}img/T_rms_profile.txt'.format(dir), 'w') as rmsFile:
@@ -213,12 +236,8 @@ with open('{}img/T_rms_profile.txt'.format(dir), 'w') as rmsFile:
 with open('{}img/z.txt'.format(dir), 'w') as rmsFile:
     rmsFile.write(str(z))
 
-
 T_rms_derivative = derivative(T_rms_prof, z)
 upper_trms,lower_trms,avg_trms,points_trms = determine_root(T_rms_derivative, z)
-
-
-
 
 ## Calculating the thermal boundary layer, dosnt really need to be in a function ##
 def thermal_boundaries():
@@ -246,6 +265,9 @@ thermal_boundaries()
 avg_u_h = np.average(np.array(U_h[-transient:,0,0,:]), axis=0) ## Create an array which contains only the last N points, then avg over this ##
 avg_temp_profile = np.average(np.array(advection[-transient:,0,0,:] + conduction[-transient:,0,0,:]), axis=0)
 
+with open('{}img/u_h.txt'.format(dir), 'w') as rmsFile:
+    rmsFile.write(str(avg_u_h))
+
 upper_viscous_boundary, lower_viscous_boundary, avg_viscous_boundary, avg_points = determine_root(derivative(avg_u_h,z),z) ## Calc boundary layers
 
 Dt = 0.5 + lower_trms
@@ -260,9 +282,9 @@ print('\n')
 print('-'*widthOfTerminal)
 print('|     -    | Run time  |   Convective time | File length | Snapshots |     Pe    |    Re    |  Int Nu  |   Err Nu   |  Viscous/Points  | Thermal/Points | Energy Balance |')
 print('-'*widthOfTerminal)
-print('| Avgerage |   {:.2f}    |       {}        |    {}    |     {}    |  {:.3f}  |  {:.3f}  |   {:.3f}  |     {:.2f}   |   {:.3f}/{:.1f}   |   {:.3f}/{:.1f} |      {:.2f}%     |'.format(Time[-1], int(Time[-1]*np.sqrt(Ra*Pr)), len(Nu_integral), len(full_T), np.average(Pe[-transient:]), np.average(Re[-transient:]), np.average(Nu_integral[-transient:]), np.average(Nu_Error[-transient:]), dv, avg_points, Dt, points_trms, Balance))
+print('| Avgerage |   {:.4f}    |       {}        |    {}    |     {}    |  {:.3f}  |  {:.3f}  |   {:.3f}  |     {:.2f}   |   {:.6f}/{:.1f}   |   {:.6f}/{:.1f} |      {:.2f}%     |'.format(Time[-1], int(Time[-1]*np.sqrt(Ra*Pr)), len(Nu_integral), len(full_T), np.average(Pe[-transient:]), np.average(Re[-transient:]), np.average(Nu_integral[-transient:]) + 1 , np.average(Nu_Error[-transient:]), dv, avg_points, Dt, points_trms, Balance))
 print('-'*widthOfTerminal)
-print('|   std    |     -     |        -          |      -      |     -     |   {:.3f}   |   {:.3f}  |   {:.3f}  |     {:.2f}   |     -     |     -   |        -       |'.format(np.std(Pe[-transient:]), np.std(Re[-transient:]), np.std(Nu_integral[-transient:]), np.std(Nu_Error[-transient:])     ))
+print('|   std    |     -     |        -          |      -      |     -     |   {:.3f}   |   {:.3f}  |   {:.3f}  |     {:.2f}   |     -     |     -   |        -       |'.format(np.std(Pe[-transient:]), np.std(Re[-transient:]), np.std(Nu_integral[-transient:]), np.std(Nu_Error[-transient:])))
 print('-'*widthOfTerminal)
 print('\n')
 
@@ -270,7 +292,7 @@ print('\n')
 #print('Bottom Nusselt: {:.3f}, std = {:.3f}.'.format(np.average(Nu_bottom[-transient:]),np.std(Nu_bottom[-transient:])))
 #print('Midplane Nusselt: {:.3f}, std = {:.3f}.'.format(np.average(Nu_midplane[-transient:]),np.std(Nu_midplane[-transient:])))
 #print('Max Velocities: u = {:.3f}, v = {:.3f}, w = {:.3f}.'.format(np.average(u_max), np.average(v_max), np.average(w_max)))
-print('Buoyancy = {:.4e}, Dissipation = {:.4e}, Energy Balance = {:.3f}%.'.format(np.average(Buoyancy[-transient:]), np.average(Dissipation[-transient:]), Balance))
+print('Buoyancy = {:.4e}, Dissipation = {:.4e}, Energy Balance = {:.3f}%.'.format(np.average(Buoyancy[-transient:]) / 2, np.average(Dissipation[-transient:]) / 2, Balance))
 #print('Using (Long,2020) upper: {:.4f}, lower: {:.4f}, avg: {:.4f}, points in boundary: {}.'.format(np.average(ThermalBoundary),np.average(upper_thermal_boundary),(np.average(ThermalBoundary)+np.average(upper_thermal_boundary))/2, points_in_dt))
 #print('The average viscous boundary layer thickness is {:.4f}, and there are {} points in the boundary.'.format(avg_viscous_boundary, avg_points))
 #print('Using the T rms method, upper: {:.5f}, lower: {:.5f}, avg: {:.5f} and number of points {}.'.format(0.5-upper_trms,0.5+lower_trms,avg_trms,points_trms))

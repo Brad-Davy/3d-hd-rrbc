@@ -26,7 +26,8 @@ from numpy.fft import fftn
 from dedalus import public as de
 from dedalus.core.operators import Integrate 
 from colours import *
-
+import matplotlib 
+matplotlib.use('Agg')
 # =============================================================================
 # Extract the docopt arguments 
 # =============================================================================
@@ -270,7 +271,7 @@ def multiplyFields(field):
 
     return multipliedField
 
-def computeRMS(Fx, Fy, Fz, N = 128):
+def computeRMS(Fx, Fy, Fz, N = 96):
     """ 
     
 
@@ -335,7 +336,7 @@ def removeMeanProfile(Force):
     return np.rot90(rotatedForce - meanProfile3DArray, k = -1, axes = (2,0)) 
 
 def createSurfacePlot(FFTofForce):
-    """
+    """ 
     
 
     Parameters
@@ -355,7 +356,7 @@ def createSurfacePlot(FFTofForce):
     return forceSpectrum
 
 def plotHorizontalWaveNumber(FFTofForce):
-    """
+    """ 
     
 
     Parameters
@@ -393,7 +394,7 @@ def plotHorizontalWaveNumber(FFTofForce):
     plt.yscale('log')
     plt.show()
     
-def computeKineticEnergy(u, v, w, N = 128):
+def computeKineticEnergy(u, v, w, N = 96):
     """ 
     
 
@@ -433,7 +434,7 @@ def computeKineticEnergy(u, v, w, N = 128):
     #return np.sum(kineticEnergy['g'])/(128**3)
         
 def plotTotalWaveNumber(u,v,w):
-    """
+    """ 
     
 
     Parameters
@@ -561,16 +562,11 @@ def computeFromNegativeSpectrum(negativeForce):
     
     return horizontalAveragedSpectra
 
-def computeHorizontalSpectraFromRealSpace(Fx, Fy, Fz, N = 128, Gamma = 1):
+def computeHorizontalSpectraFromRealSpace(Fx, Fy, Fz, Nx = 128, Nz = 128, Gamma = 1):
     
-    Nx = Ny = N
-    Nz = int(N)
-    Lx = 2
-    Ly = 2
-    Lz = 1
-    
-    x_basis = de.Fourier('x', Nx, interval = (0, 2))
-    y_basis = de.Fourier('y', Ny, interval = (0, 2))
+    Ny = Nx    
+    x_basis = de.Fourier('x', Nx, interval = (0, Gamma))
+    y_basis = de.Fourier('y', Ny, interval = (0, Gamma))
     z_basis = de.Chebyshev('z', Nz, interval = (-1/2,1/2))
     domain = de.Domain([x_basis, y_basis, z_basis], grid_dtype=np.float64)
     
@@ -584,7 +580,7 @@ def computeHorizontalSpectraFromRealSpace(Fx, Fy, Fz, N = 128, Gamma = 1):
     coefficientField['g'] = (fft2Fx.real**2 + fft2Fx.imag**2 + fft2Fy.real**2 + fft2Fy.imag**2 + fft2Fz.real**2 + fft2Fz.imag**2) / (Nx*Ny)
     realField['g'] = Fx**2 + Fy**2 + Fz**2
     
-    realIntegral = (1/(Lx*Ly*Lz))*realField.integrate()['g'][0,0,0]
+    realIntegral = (1/(Gamma*Gamma))*realField.integrate()['g'][0,0,0]
     zSumCoefficient = np.sum(coefficientField['g'], axis=2) / (Nx*Ny)
     sumOfSpectra = np.sum(zSumCoefficient) 
     
@@ -610,7 +606,7 @@ def computeHorizontalSpectraFromRealSpace(Fx, Fy, Fz, N = 128, Gamma = 1):
     return horizontalSpectra
 
 
-def computeHorizontalSpectraFromRealSpaceForComparison(Fx, Fy, Fz, N = 128, Gamma = 1):
+def computeHorizontalSpectraFromRealSpaceForComparison(Fx, Fy, Fz, N = 96, Gamma = 1):
     
     Nx = Ny = N
     Nz = int(N)
@@ -813,7 +809,7 @@ for idx in range(1,snap_t+1):
     BuoyancyTimeSeries.append(computeHorizontalSpectraFromRealSpace(blankMatrix, blankMatrix, z_buoyancy[-idx]))
     PressureTimeSeries.append(computeHorizontalSpectraFromRealSpace(removeBoundaries(Mask, x_pressure[-idx]), removeBoundaries(Mask, y_pressure[-idx]), removeBoundaries(Mask, z_pressure[-idx])))
     ACoriolisTimeSeries.append(computeHorizontalSpectraFromRealSpace(removeBoundaries(Mask, x_pressure[-idx] + x_coriolis[-idx]), removeBoundaries(Mask, y_pressure[-idx] + y_coriolis[-idx]), removeBoundaries(Mask, z_pressure[-idx])))
-    KineticTimeSeries.append(computeHorizontalSpectraFromRealSpace(u[-idx] , v[-idx], w[-idx]))
+    KineticTimeSeries.append(computeHorizontalSpectraFromRealSpace(removeBoundaries(Mask, u[-idx]) , removeBoundaries(Mask, v[-idx]), removeBoundaries(Mask, w[-idx])))
 
         
     vorticityViscosityTimeSeries.append(computeHorizontalSpectraFromRealSpace(removeBoundaries(Mask, vorticity_x_diffusion[-idx]), removeBoundaries(Mask, vorticity_y_diffusion[-idx]), removeBoundaries(Mask, vorticity_z_diffusion[-idx])))
@@ -880,19 +876,57 @@ plt.plot(range(len(BuoyancySpectrum)), PressureSpectrum, label = '$F_P$', color 
 plt.plot(range(len(ViscositySpectrum)), ACoriolisSpectrum, label = '$F_{AC}$', color = ACColour, lw=spectrumlw)
 plt.xscale("log")
 plt.yscale("log")
-plt.xlabel('$K_z$')
+plt.xlabel('$K_h$')
 plt.ylabel('Magnitude')
 plt.xlim(1, upperXLim)
 
-# =============================================================================
-# viscosityIndex, viscosityIntersection = findIntersection(ViscositySpectrum, ACoriolisSpectrum)
-# print('The intersection between viscosity and the Ageostrophic Coriolis force in the force spectra is: {:.2f}.'.format(viscosityIndex))
-# plt.plot(np.ones(100)*viscosityIndex, np.linspace(0, viscosityIntersection, 100), 'k--')
-# plt.annotate('$L_v = ${:.1f}'.format(viscosityIndex), (viscosityIndex // 2, max(ViscositySpectrum) // 10))
-# inertiaIndex, inertiaIntersection = findIntersection(InertiaSpectrum, ACoriolisSpectrum)
-# plt.plot(np.ones(100)*inertiaIndex, np.linspace(0, inertiaIntersection, 100), 'k--')
-# plt.annotate('$L_I = ${:.1f}'.format(inertiaIndex), (inertiaIndex // 2, max(ViscositySpectrum) // 20))
-# =============================================================================
+
+fig = plt.figure(figsize=(10,10))
+plt.plot(range(len(ViscositySpectrum)), InertiaSpectrum / ViscositySpectrum, label = 'Re', color = ViscosityColour)
+plt.plot(range(len(ViscositySpectrum)), ViscositySpectrum / InertiaSpectrum, label = 'Ro', color = InertiaColour)
+plt.xscale("log")
+plt.yscale("log")
+plt.xlabel('$K_h$')
+plt.ylabel('Magnitude')
+plt.xlim(1, upperXLim)
+
+
+
+with open('{}img/viscosity.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(ViscositySpectrum))
+
+with open('{}img/inertia.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(InertiaSpectrum))
+
+with open('{}img/coriolis.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(CoriolisSpectrum))
+
+with open('{}img/buoyancy.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(BuoyancySpectrum))
+
+with open('{}img/pressure.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(PressureSpectrum))
+
+with open('{}img/ageocor.txt'.format(dir), 'w') as kineticFile:
+    kineticFile.write(str(ACoriolisSpectrum))
+
+
+with open('{}img/voritcityViscosity.txt'.format(dir), 'w') as kineticFile:
+    print('Viscosity file created')
+    kineticFile.write(str(vorticityViscositySpectrum))
+
+with open('{}img/vorticityInertia.txt'.format(dir), 'w') as kineticFile:
+    print('Inertia file created')
+    kineticFile.write(str(vorticityInertiaSpectrum))
+
+with open('{}img/vorticityCoriolis.txt'.format(dir), 'w') as kineticFile:
+    print('Coriolis file created')
+    kineticFile.write(str(vorticityCoriolisSpectrum))
+
+with open('{}img/vorticityBuoyancy.txt'.format(dir), 'w') as kineticFile:
+    print('Buoyancy file created')
+    kineticFile.write(str(vorticityBuoyancySpectrum))
+
 
 legend_properties = {'weight':'bold'}
 plt.title('Force Spectra')
@@ -907,7 +941,7 @@ plt.plot(range(len(InertiaSpectrum)), vorticityInertiaSpectrum, label = '$\\omeg
 plt.plot(range(len(BuoyancySpectrum)), vorticityBuoyancySpectrum, label = '$\\omega_B$', color = BuoyancyColour, lw=spectrumlw)
 plt.xscale("log")
 plt.yscale("log")
-plt.xlabel('$K_z$')
+plt.xlabel('$K_h$')
 plt.title('Vorticity Equation')
 plt.ylabel('Magnitude')
 plt.xlim(1, upperXLim)
@@ -942,7 +976,7 @@ with open('{}img/kinetic.txt'.format(dir), 'w') as kineticFile:
 
 plt.xscale("log")
 plt.yscale("log")
-plt.xlabel('$K_z$')
+plt.xlabel('$K_h$')
 plt.ylabel('Kinetic Energy')
 plt.xlim(1, upperXLim)
 plt.savefig('{}/img/KineticSpectrum.eps'.format(dir), dpi=500)
