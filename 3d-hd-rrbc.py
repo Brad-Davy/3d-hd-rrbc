@@ -1,7 +1,7 @@
 """ Dedalus simulation of 3d Rayleigh benard rotating convection.
 
 Usage:
-    3d-hd-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>] [--e_z=<enhanced_z>]
+    3d-hd-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>] [--e_z=<enhanced_z>] [--seed=<Seed>]
     3d-hd-rrbc.py -h | --help
 Options:
     -h --help               Display this help message
@@ -15,6 +15,7 @@ Options:
     --q=<q>                 Hyperdiffusion parameter [default: 1.05]
     --k_0=<k_0>             Hyperdiffusion parameter [default: 32]
     --e_z=<enhanced_z>      Enhanced number of nodes in z  [default: 0]
+    --seed=<Seed>           Seed for initial conditions [default: None]
 """
 
 from mpi4py import MPI
@@ -26,6 +27,7 @@ from dedalus.extras import flow_tools
 from docopt import docopt
 import logging
 import os
+import h5py
 logger = logging.getLogger(__name__)
 
 # =============================================================================
@@ -47,7 +49,7 @@ if enhancedZ == 0:
     Nz = int(N/2)
 
 elif enhancedZ == 1:
-    Nz = N
+    Nz = 128
    
 else:
     raise Exception('Please specify the number of nodes in z.')
@@ -70,6 +72,7 @@ max_dt = float(args['--max_dt'])
 init_dt = float(args['--init_dt'])
 q = float(args['--q'])
 k_0 = int(args['--k_0'])
+seed = args['--seed']
 
 # =============================================================================
 # Format the mesh input
@@ -115,7 +118,7 @@ if comm.rank==0:
 start_init_time = time.time()
 x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2, hyp = q, cutoff = k_0)
 y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2, hyp = q, cutoff = k_0)
-z_basis = de.Chebyshev('z', Nz, interval = (-Lz/2,Lz/2), dealias =3/2)
+z_basis = de.Chebyshev('z', Nz, interval = (-Lz/2,Lz/2), dealias = 3/2)
 domain = de.Domain([x_basis, y_basis, z_basis], grid_dtype=np.float64, comm=comm, mesh=mesh)
 
 # =============================================================================
@@ -184,18 +187,58 @@ logger.info('Solver built')
 z = domain.grid(2)
 T = solver.state['T']
 Tz = solver.state['Tz']
+u = solver.state['u']
+v = solver.state['v']
+w = solver.state['w']
+uz = solver.state['uz']
+vz = solver.state['vz']
+wz = solver.state['wz']
 
-# =============================================================================
-# Random perturbations, initialized globally for same results in parallel 
-# =============================================================================
 
-gshape = domain.dist.grid_layout.global_shape(scales=1)
-slices = domain.dist.grid_layout.slices(scales=1)
-rand = np.random.RandomState(seed=23)
-noise = rand.standard_normal(gshape)[slices]
-pert = 1e-4 * noise
-T['g'] =  pert 
-T.differentiate('z',out=Tz)
+if seed == 'None':
+
+    # =============================================================================
+    # Random perturbations, initialized globally for same results in parallel 
+    # =============================================================================
+
+    gshape = domain.dist.grid_layout.global_shape(scales=1) # This is the shape of the domain
+    slices = domain.dist.grid_layout.slices(scales=1)
+    rand = np.random.RandomState(seed=23)
+    noise = rand.standard_normal(gshape)[slices]
+    pert = 1e-4 * noise
+    T['g'] =  pert 
+    T.differentiate('z',out=Tz)
+
+
+else:
+    with h5py.File('{}'.format(seed), mode = 'r') as file:
+
+        seedUField = np.copy(file['u'])
+        seedVField = np.copy(file['v'])
+        seedWField = np.copy(file['w'])
+        seedTemperatureField = np.copy(file['T'])
+        seedUzField = np.copy(file['uz'])
+        seedVzField = np.copy(file['vz'])
+        seedWzField = np.copy(file['wz'])
+        seedTzField = np.copy(file['Tz'])
+        sim_start_time = np.copy(file['sim_time'])[-1]
+
+    gshape = domain.dist.grid_layout.global_shape(scales=1)
+    slices = domain.dist.grid_layout.slices(scales=1)
+
+    if gshape[0] != np.shape(seedTemperatureField)[0]:
+        raise Exception('Make sure the seed field and new field match in dimensions.')
+
+    else:
+        T['g'] = seedTemperatureField[slices]
+        u['g'] = seedUField[slices]
+        v['g'] = seedVField[slices]
+        w['g'] = seedWField[slices]
+        uz['g'] = seedUzField[slices]
+        vz['g'] = seedVzField[slices]
+        wz['g'] = seedWzField[slices]
+        Tz['g'] = seedTzField[slices]
+        solver.sim_time = 0
 
 # =============================================================================
 # Setting the simulation duration
@@ -282,10 +325,7 @@ snap.add_task("(Pr/Ek)*wz", name = 'vorticity_z_coriolis')
 # Energy equation
 # =============================================================================
 
-snap.add_task("-u*(u*dx(u) + v*dy(u) + w*uz) - v*(u*dx(v) + v*dy(v) + w*vz) - w*(u*dx(w) + v*dy(w) + w*wz)", name = 'inertia_energy')
-snap.add_task("Ra*Pr*w*T", name = 'buoyancy_energy')
-snap.add_task("-u*dx(p) - v*dy(p) - w*dz(p)", name = 'pressure_energy')
-snap.add_task("Pr*( u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)) )", name = 'diffusion_energy')
+snap.add_task("Pr*(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)))", name = 'diffusion_energy')
 
 # =============================================================================
 # Dedalus analysis files containing integral properties of the system
@@ -305,10 +345,8 @@ analysis.add_task("(1/Lx)*integ((1/Ly)*integ( sqrt(w*w),'y'),'x')", name = "w_pr
 analysis.add_task("sqrt((1/Lx)*integ((1/Ly)*integ(u*u + v*v + w*w,'y'),'x'))", name = "Pe_prof")
 analysis.add_task("(1/Pr)*(1/Lx)*integ((1/Ly)*integ( sqrt(u*u + v*v + w*w),'y'),'x')", name = "Re_prof")
 analysis.add_task("(1/Lx)*integ((1/Ly)*integ( sqrt(u*u + v*v),'y'),'x')", name = "U_H_prof")
-
 analysis.add_task("-(Pr/(Lz*Lx*Ly))*integ(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w))+dz(wz)))", name = "dissip")
 analysis.add_task("(Ra*Pr/(Lz*Lz*Ly))*integ(T*w)",name = "buoyancy")
-
 analysis.add_task("z", name = "z")
 analysis.add_task("(1/(Lx*Ly))*integ(integ( Tz,'x'),'y')", name = "conduction_prof")
 analysis.add_task("(1/(Lx*Ly))*integ(integ( w*T,'x'),'y')", name = "advection_prof")
@@ -336,7 +374,7 @@ flow.add_property("interp((1/(Ly))*integ((1/Lx)*integ(-dz(T) ,'x'),'y') , z = 0.
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=-0.5)", name = "T_bot")
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=0.5)", name = "T_top")
 flow.add_property("interp(interp(interp(T,x=1),y=1),z=0)", name = "T_mid")
-flow.add_property("-(1/(Lz*Ly*Lx))*integ(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)))", name = "dissip")
+flow.add_property("-(Pr/(Lz*Ly*Lx))*integ(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)))", name = "dissip")
 flow.add_property("(Ra*Pr/(Lz*Lz*Ly))*integ(T*w)",name = "buoyancy")
 flow.add_property("u", name = 'u')
 flow.add_property('v', name = 'v')
@@ -352,10 +390,11 @@ logger.info('Initialization time: %f' %(end_init_time-start_init_time))
 # Open the log file and write the titles too 
 # =============================================================================
 
-log_file = open('results/{}/{}log.txt'.format(file_tag,file_tag),'w')
-log_file.write("3D-rrbc, Ra:{:.2e}, Ek:{:.2e}, Nz:{}, Ny:{}, Nx:{}, Pr:{}, \n".format(Rayleigh,Ekman,Nz,Ny,Nx,Prandtl))
-log_file.write('time\tRe\tNu-top\tNu-bottom\tNu-midplane\tNu-integral\tumax\tvmax\twmax\tbuoyancy\tdissip\tenergy-balance\tnu-error\tD_visc\tthermal_dissipation\t\n')
-log_file.close()
+if seed == 'None':
+    log_file = open('results/{}/{}log.txt'.format(file_tag,file_tag),'w')
+    log_file.write("3D-rrbc, Ra:{:.2e}, Ek:{:.2e}, Nz:{}, Ny:{}, Nx:{}, Pr:{}, \n".format(Rayleigh,Ekman,Nz,Ny,Nx,Prandtl))
+    log_file.write('time\tRe\tNu-top\tNu-bottom\tNu-midplane\tNu-integral\tumax\tvmax\twmax\tbuoyancy\tdissip\tenergy-balance\tnu-error\tD_visc\tthermal_dissipation\t\n')
+    log_file.close()
 
 # =============================================================================
 # Main loop 
@@ -398,7 +437,7 @@ try:
             logger.info('u:{:.4e}, v:{:.4e}, w:{:.4e}'.format(uu,vv,ww))
             logger.info('buoyancy:{:5.4e}, dissipation:{:5.4e}, balance:{:.3f}%'.format(buoyancy, viscousDissipation, 100*balance))
             logger.info('Thermal Balance = {:.3f}%.'.format(100*((nu_int - flow.max('thermal_dissipation'))/flow.max('thermal_dissipation'))))
-            if comm.rank==0:
+            if comm.rank == 0:
                 output_file = open('results/{}/{}log.txt'.format(file_tag,file_tag),'a')
                 output_file.write("{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t{:5.4e}\t\n".format(sim_time, reynolds, nu_top,nu_bot, nu_mid, nu_int, uu, vv, ww, buoyancy, viscousDissipation, balance, nu_balance, T_dissip))
                 output_file.close()
