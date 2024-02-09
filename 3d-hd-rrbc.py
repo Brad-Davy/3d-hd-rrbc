@@ -1,21 +1,23 @@
 """ Dedalus simulation of 3d Rayleigh benard rotating convection.
 
 Usage:
-    3d-hd-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--N=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>] [--e_z=<enhanced_z>] [--seed=<Seed>]
+    3d-hd-rrbc.py [--ra=<rayleigh>] [--ek=<ekman>] [--Nh=<resolution>] [--Nz=<resolution>] [--max_dt=<Maximum_dt>]  [--init_dt=<Initial_dt>] [--pr=<prandtl>] [--mesh=<mesh>] [--q=<q>] [--k_0=<k_0>] [--e_z=<enhanced_z>] [--seed=<Seed>] [--gamma=<Gamma>]
     3d-hd-rrbc.py -h | --help
 Options:
     -h --help               Display this help message
     --ra=<rayliegh>         Rayleigh number [default: 3.3e5]
     --ek=<ekman>            Ekman number [default: 1e-3]
-    --N=<resolution>        Nx=Ny=2Nz [default: 64]
+    --Nh=<resolution>       Horizontal resolution [default: 256]
+    --Nz=<vertical>         Vertical resolution [default: 128]
     --max_dt=<Maximum_dt>   Maximum Time Step [default: 1e-3]
     --pr=<prandtl>          Prandtl number [default: 7]
     --mesh=<mesh>           Parallel mesh [default: None]
     --init_dt=<Initial_dt>  Initial Time Step [default: 1e-3]
     --q=<q>                 Hyperdiffusion parameter [default: 1.05]
-    --k_0=<k_0>             Hyperdiffusion parameter [default: 32]
+    --k_0=<k_0>             Hyperdiffusion parameter [default: 8]
     --e_z=<enhanced_z>      Enhanced number of nodes in z  [default: 0]
     --seed=<Seed>           Seed for initial conditions [default: None]
+    --gamma=<Gamma>         Aspect ratio [default: 2]
 """
 
 from mpi4py import MPI
@@ -41,24 +43,17 @@ comm = MPI.COMM_WORLD
 # Pull the number of spectral modes from the input 
 # =============================================================================
 
-N = int(args['--N'])
+Nh = int(args['--Nh'])
+Nz = int(args['--Nz'])
+gamma = float(args['--gamma'])
 enhancedZ = int(args['--e_z'])
-Nx = Ny = N
-
-if enhancedZ == 0:
-    Nz = int(N/2)
-
-elif enhancedZ == 1:
-    Nz = 128
-   
-else:
-    raise Exception('Please specify the number of nodes in z.')
+Nx = Ny = Nh
 
 # =============================================================================
 # Set the aspect ratio 
 # =============================================================================
 
-Lx = Ly = 2
+Lx = Ly = gamma
 Lz = 1
 
 # =============================================================================
@@ -88,7 +83,7 @@ else:
 # =============================================================================
 
 sim_end_time = 20
-max_iterations = 1000000
+max_iterations = 30000
 sim_wall_time = 24*60*60*24
 
 # =============================================================================
@@ -114,7 +109,7 @@ if comm.rank==0:
 # =============================================================================
 # Set up the geometry of the run
 # =============================================================================
-
+print(Nx,Ny,Nz)
 start_init_time = time.time()
 x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=3/2, hyp = q, cutoff = k_0)
 y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=3/2, hyp = q, cutoff = k_0)
@@ -206,7 +201,7 @@ if seed == 'None':
     rand = np.random.RandomState(seed=23)
     noise = rand.standard_normal(gshape)[slices]
     pert = 1e-4 * noise
-    T['g'] =  pert 
+    T['g'] =  pert
     T.differentiate('z',out=Tz)
 
 
@@ -221,7 +216,7 @@ else:
         seedVzField = np.copy(file['vz'])
         seedWzField = np.copy(file['wz'])
         seedTzField = np.copy(file['Tz'])
-        sim_start_time = np.copy(file['sim_time'])[-1]
+        sim_start_time = 0 #np.copy(file['sim_time'])[-1]
 
     gshape = domain.dist.grid_layout.global_shape(scales=1)
     slices = domain.dist.grid_layout.slices(scales=1)
@@ -252,9 +247,8 @@ solver.stop_iteration = max_iterations
 # Snapshots of the entire domain
 # =============================================================================
 
-snap = solver.evaluator.add_file_handler('results/{}/{}snapshots'.format(file_tag,file_tag), iter = 5000, max_writes = 20)
+snap = solver.evaluator.add_file_handler('results/{}/{}snapshots'.format(file_tag,file_tag), iter = 3000, max_writes = 20)
 snap.add_system(solver.state)
-snap.add_task("u*u + v*v + w*w", layout = 'c', name = 'kinetic_spectrum')
 
 # =============================================================================
 # Compute each terms seperatley, i.e. F_x, F_y, F_z and compute rms as 
@@ -290,7 +284,7 @@ snap.add_task("Ra*Pr*T", name = 'z_bouyancy')
 
 
 # =============================================================================
-# Dealing with the curl of the equations to exclude pressure and terms balancing 
+# Dealing with the curl of the equations to exclude pressure and terms balancing
 # with pressure, i.e. the vorticity equation.
 # =============================================================================
 
@@ -320,12 +314,6 @@ snap.add_task("-(u*dx(w_2) + v*dy(w_2) + w*w_2_z)", name = 'vorticity_y_inertia'
 snap.add_task("Pr*(hdx(hdx(w_3)) + hdy(hdy(w_3)) + dz(w_3_z))", name = 'vorticity_z_diffusion')
 snap.add_task("-(u*dx(w_3) + v*dy(w_3) + w*w_3_z)", name = 'vorticity_z_inertia')
 snap.add_task("(Pr/Ek)*wz", name = 'vorticity_z_coriolis')
-
-# =============================================================================
-# Energy equation
-# =============================================================================
-
-snap.add_task("Pr*(u*(hdx(hdx(u)) + hdy(hdy(u)) + dz(uz)) + v*(hdx(hdx(v)) + hdy(hdy(v)) + dz(vz)) + w*(hdx(hdx(w)) + hdy(hdy(w)) + dz(wz)))", name = 'diffusion_energy')
 
 # =============================================================================
 # Dedalus analysis files containing integral properties of the system
