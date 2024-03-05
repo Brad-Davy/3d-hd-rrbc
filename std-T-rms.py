@@ -80,8 +80,9 @@ with h5py.File('{}{}/analysis.h5'.format(dir,analysis_file_name), mode = 'r') as
 # Load the data from the snapshot file 
 # =============================================================================
 
-with h5py.File('{}{}/new_snapshots_file.h5'.format(dir,snapshot_file_name), mode = 'r') as file:
-   full_T = np.copy(file['tasks']['T'])[-snap_t:,:,:,:]
+with h5py.File('{}{}/snapshots.h5'.format(dir,snapshot_file_name), mode = 'r') as file:
+    numberOfFiles = np.shape(np.copy(file['tasks']['T']))[0]
+    full_T = np.copy(file['tasks']['T'])[-snap_t:,:,:,:]
 
 def calculateSTDOfTrms(data):
     topBoundaries = []
@@ -118,5 +119,6 @@ for idxt,time_step in enumerate(full_T):
         T_rms.append(temp_array)
 
 avg, std = calculateSTDOfTrms(T_rms)
+print('There are {} files.'.format(numberOfFiles))
 print('Avg: {:.4f}, STD: {:.4f}, % diff: {:.2f}%'.format(avg, std, (std/avg)*100))
 
