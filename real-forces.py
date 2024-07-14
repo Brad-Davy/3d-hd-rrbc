@@ -35,6 +35,10 @@ fig_bool = bool(args['--fig'])
 transient = int(args['--t'])
 snap_t = int(args['--snap_t'])
 mask = int(args['--mask'])
+Nh = 192
+Nz = 192
+Gamma = 1
+printMidPoint = False
 
 # =============================================================================
 # Set some plotting parameters for later 
@@ -326,10 +330,8 @@ def removeBoundaries(Mask, Force):
     MaskedForce = RotatedForce*Mask
     Force['g'] = np.rot90(MaskedForce,	k=-1, axes = (2,0))
 
-def integrate(field):
-    return field.integrate()['g'][0,0,0]
-
-
+def integrate(field, p):
+    return field.integrate()['g'][0,0,0] / p
 
 def curlHelper(Fx, Fy, Fz):
 
@@ -374,6 +376,23 @@ def curl(Fx, Fy, Fz):
         OyArray.append(Oy['g'])
         OzArray.append(Oz['g'])
     return OxArray, OyArray, OzArray
+
+def generateMask(nToRemove, blThickness, z):
+
+    Mask = np.rot90(np.ones(np.shape(x_diffusion[-1]),dtype=np.int32), k=1 , axes=(2,0))
+    layerToRemove = (blThickness * nToRemove) - 0.5
+    percentageOfDomain = 1-(blThickness * nToRemove * 2)
+    for idx,lines in enumerate(z):
+        if lines > layerToRemove:
+            avg_points = idx - 1
+            
+            break
+
+    for idx,slices in enumerate(Mask):
+        if idx < avg_points or idx >= len(z) - avg_points:
+            Mask[idx] = np.zeros(np.shape(slices))
+
+    return Mask, percentageOfDomain
 
 # =============================================================================
 # Load the data from the snapshot data file
@@ -455,10 +474,9 @@ with h5py.File('{}{}/snapshots.h5'.format(dir,snapshot_file_name), mode = 'r') a
 # spectra.
 # =============================================================================
 
-Nx = Ny = 256
-Lx = Ly = 2
+Nx = Ny = Nh
+Lx = Ly = Gamma
 Lz = 1
-Nz = int(N/Lx)
 
 x_basis = de.Fourier('x', Nx, interval = (0,Lx), dealias=1)
 y_basis = de.Fourier('y', Ny, interval = (0,Ly), dealias=1)
@@ -500,11 +518,7 @@ upper_viscous_boundary, lower_viscous_boundary, avg_viscous_boundary, avg_points
 # force plots.
 # =============================================================================
 
-Mask = np.rot90(np.ones(np.shape(x_diffusion[-1]),dtype=np.int32), k=1 , axes=(2,0))
-
-for idx,slices in enumerate(Mask):
-    if idx < avg_points or idx >= len(z) - avg_points:
-        Mask[idx] = np.zeros(np.shape(slices))
+Mask, percentageOfDomain = generateMask(nToRemove = mask, blThickness = avg_viscous_boundary, z = z)
 
 # =============================================================================
 # Arrays containing the time series for the horizontal average
@@ -521,6 +535,18 @@ horizontalAvgvViscosityTimeSeries = []
 horizontalAvgvCoriolisTimeSeries = []
 horizontalAvgvBuoyancyTimeSeries = []
 horizontalAvgvInertiaTimeSeries = []
+
+integratedPressure = []
+integratedCoriolis = []
+integratedViscosity = []
+integratedInertia = []
+integratedBuoyancy = []
+integratedACoriolis = []
+
+integratedvCoriolis = []
+integratedvViscosity = []
+integratedvInertia = []
+integratedvBuoyancy = []
 
 blankMatrix = np.zeros(np.shape(z_diffusion[-1]), dtype=np.int32)
 
@@ -540,7 +566,7 @@ for idx in range(1,snap_t+1):
     vViscosity['g'] = computeRMS(vorticity_x_diffusion[-idx], vorticity_y_diffusion[-idx], vorticity_z_diffusion[-idx])
     vCoriolis['g'] = computeRMS(vorticity_x_coriolis[-idx], vorticity_y_coriolis[-idx], vorticity_z_coriolis[-idx])
     vInertia['g'] = computeRMS(vorticity_x_inertia[-idx], vorticity_y_inertia[-idx], vorticity_z_inertia[-idx])
-    vBuoyancy['g'] = computeRMS(vorticity_x_bouyancy[-idx], vorticity_y_bouyancy[-idx], vorticity_z_bouyancy[-idx])
+    vBuoyancy['g'] = computeRMS(vorticity_x_bouyancy[-idx], vorticity_y_bouyancy[-idx], blankMatrix)
 
     # =========================================================================
     # Remove the boundaries
@@ -552,6 +578,25 @@ for idx in range(1,snap_t+1):
     removeBoundaries(Mask, Inertia)
     removeBoundaries(Mask, ACoriolis)
     removeBoundaries(Mask, Buoyancy)
+
+    removeBoundaries(Mask, vViscosity)    
+    removeBoundaries(Mask, vCoriolis)
+    removeBoundaries(Mask, vInertia)
+    removeBoundaries(Mask, vBuoyancy)
+
+    integratedPressure.append(integrate(Pressure, p = percentageOfDomain))
+    integratedViscosity.append(integrate(Viscosity, p = percentageOfDomain))
+    integratedInertia.append(integrate(Inertia, p = percentageOfDomain))
+    integratedBuoyancy.append(integrate(Buoyancy, p = percentageOfDomain))
+    integratedCoriolis.append(integrate(Coriolis, p = percentageOfDomain))
+    integratedACoriolis.append(integrate(ACoriolis, p = percentageOfDomain))
+
+    integratedvViscosity.append(integrate(vViscosity, p = percentageOfDomain))
+    integratedvInertia.append(integrate(vInertia, p = percentageOfDomain))
+    integratedvBuoyancy.append(integrate(vBuoyancy, p = percentageOfDomain))
+    integratedvCoriolis.append(integrate(vCoriolis, p = percentageOfDomain))
+
+
 
     # =========================================================================
     # Compute the horizontal average
@@ -573,6 +618,7 @@ for idx in range(1,snap_t+1):
 # =============================================================================
 # Time avg the profiles
 # =============================================================================
+
 ViscosityProfile = np.average(np.array(horizontalAvgViscosityTimeSeries), axis=0)
 InertiaProfile = np.average(np.array(horizontalAvgInertiaTimeSeries), axis=0)
 BuoyancyProfile = np.average(np.array(horizontalAvgBuoyancyTimeSeries), axis=0)
@@ -587,8 +633,15 @@ vCoriolisProfile = np.average(np.array(horizontalAvgvCoriolisTimeSeries), axis=0
 
 mid_point = int(Nz/2)
 
+if printMidPoint == True:
+    print('-'*120)
+    print('Mid Points ')
+    print('-'*120)
+    print('Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}, Pressure: {:.3e}, Ageo Coriolis: {:.3e}.'.format(ViscosityProfile[mid_point], CoriolisProfile[mid_point], InertiaProfile[mid_point], BuoyancyProfile[mid_point], PressureProfile[mid_point], ACoriolisProfile[mid_point]))
+    print('-'*120)
+    print('Vorticity: Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}.'.format(vViscosityProfile[mid_point], vCoriolisProfile[mid_point], vInertiaProfile[mid_point], vBuoyancyProfile[mid_point]))
+    print('-'*120)
+
 print('-'*120)
-print('Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}, Pressure: {:.3e}, Ageo Coriolis: {:.3e}.'.format(ViscosityProfile[mid_point], CoriolisProfile[mid_point], InertiaProfile[mid_point], BuoyancyProfile[mid_point], PressureProfile[mid_point], ACoriolisProfile[mid_point]))
-print('-'*120)
-print('Vorticity: Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}.'.format(vViscosityProfile[mid_point], vCoriolisProfile[mid_point], vInertiaProfile[mid_point], vBuoyancyProfile[mid_point]))
-print('-'*120)
+print('Forces -> Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}, Pressure: {:.3e}, Ageo Coriolis: {:.3e}'.format(np.average(integratedViscosity), np.average(integratedCoriolis), np.average(integratedInertia), np.average(integratedBuoyancy), np.average(integratedPressure), np.average(integratedACoriolis)))
+print('Vorticity -> Viscosity: {:.3e}, Coriolis: {:.3e}, Inertia: {:.3e}, Buoyancy: {:.3e}'.format(np.average(integratedvViscosity), np.average(integratedvCoriolis), np.average(integratedvInertia), np.average(integratedvBuoyancy)))
